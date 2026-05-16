@@ -117,14 +117,24 @@ jobs:
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
 
+          PROMPT=$(cat <<EOF
+          Write concise GitHub release notes for version $VERSION.
+
+          Pull request: #$PR_NUMBER - $PR_TITLE
+
+          Commits:
+          $COMMITS
+
+          Use markdown. Group into sections: Features, Fixes, Chores, Breaking Changes.
+          Omit empty sections. Keep it clear and useful for users.
+          EOF
+          )
+
           jq -n \
-            --arg version "$VERSION" \
-            --arg pr_title "$PR_TITLE" \
-            --arg pr_number "$PR_NUMBER" \
-            --arg commits "$COMMITS" \
+            --arg prompt "$PROMPT" \
             '{
               model: "gpt-4.1-mini",
-              input: "Write concise GitHub release notes for version " + $version + ".\n\nPull request: #" + $pr_number + " - " + $pr_title + "\n\nCommits:\n" + $commits + "\n\nUse markdown. Group into sections: Features, Fixes, Chores, Breaking Changes. Omit empty sections. Keep it clear and useful for users."
+              input: $prompt
             }' > request.json
 
           curl https://api.openai.com/v1/responses \
