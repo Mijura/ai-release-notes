@@ -1,0 +1,63 @@
+name: Validate release label
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+      - ready_for_review
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-release-label:
+    name: Validate release label
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require exactly one release label
+        run: |
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+
+          echo "PR labels: $LABELS"
+
+          COUNT=0
+
+          if echo "$LABELS" | grep -q '"release:major"'; then
+            COUNT=$((COUNT + 1))
+          fi
+
+          if echo "$LABELS" | grep -q '"release:minor"'; then
+            COUNT=$((COUNT + 1))
+          fi
+
+          if echo "$LABELS" | grep -q '"release:patch"'; then
+            COUNT=$((COUNT + 1))
+          fi
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Missing release label."
+            echo "Add exactly one of:"
+            echo "- release:major"
+            echo "- release:minor"
+            echo "- release:patch"
+            exit 1
+          fi
+
+          if [ "$COUNT" -gt 1 ]; then
+            echo "Multiple release labels found."
+            echo "Use only one of:"
+            echo "- release:major"
+            echo "- release:minor"
+            echo "- release:patch"
+            exit 1
+          fi
+
+          echo "Exactly one release label found."
