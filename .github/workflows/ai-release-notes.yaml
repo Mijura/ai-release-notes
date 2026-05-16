@@ -95,53 +95,55 @@ jobs:
 
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
 
-      - name: Collect release context
+      - name: Collect release context from merged PR only
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          LATEST="${{ steps.latest_tag.outputs.tag }}"
+          echo "PR number: $PR_NUMBER"
+          echo "Base SHA: $BASE_SHA"
+          echo "Head SHA: $HEAD_SHA"
 
-          echo "Latest tag: $LATEST"
+          git fetch origin "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"
 
-          if [ "$LATEST" = "v0.0.0" ]; then
-            git log --pretty=format:"- %s (%h)" > commits.txt
+          MERGE_BASE=$(git merge-base "$BASE_SHA" "pr-${PR_NUMBER}")
 
-            git diff --stat HEAD~1..HEAD > diff_stat.txt || true
+          echo "Merge base: $MERGE_BASE"
 
-            git diff --no-ext-diff --unified=3 HEAD~1..HEAD \
-              -- \
-              ':!package-lock.json' \
-              ':!yarn.lock' \
-              ':!pnpm-lock.yaml' \
-              ':!dist/**' \
-              ':!build/**' \
-              ':!coverage/**' \
-              ':!*.snap' \
-              > diff.txt || true
-          else
-            git log "$LATEST"..HEAD --pretty=format:"- %s (%h)" > commits.txt
+          git log "$MERGE_BASE..pr-${PR_NUMBER}" --pretty=format:"- %s (%h)" > commits.txt || true
 
-            git diff --stat "$LATEST"..HEAD > diff_stat.txt
+          git diff --stat "$MERGE_BASE..pr-${PR_NUMBER}" \
+            -- \
+            ':!package-lock.json' \
+            ':!yarn.lock' \
+            ':!pnpm-lock.yaml' \
+            ':!dist/**' \
+            ':!build/**' \
+            ':!coverage/**' \
+            ':!*.snap' \
+            > diff_stat.txt || true
 
-            git diff --no-ext-diff --unified=3 "$LATEST"..HEAD \
-              -- \
-              ':!package-lock.json' \
-              ':!yarn.lock' \
-              ':!pnpm-lock.yaml' \
-              ':!dist/**' \
-              ':!build/**' \
-              ':!coverage/**' \
-              ':!*.snap' \
-              > diff.txt
-          fi
+          git diff --no-ext-diff --unified=3 "$MERGE_BASE..pr-${PR_NUMBER}" \
+            -- \
+            ':!package-lock.json' \
+            ':!yarn.lock' \
+            ':!pnpm-lock.yaml' \
+            ':!dist/**' \
+            ':!build/**' \
+            ':!coverage/**' \
+            ':!*.snap' \
+            > diff.txt || true
 
-          echo "Commits:"
+          echo "Commits from this PR only:"
           cat commits.txt || true
 
           echo ""
-          echo "Diff summary:"
+          echo "Diff summary from this PR only:"
           cat diff_stat.txt || true
 
           echo ""
-          echo "Diff collected."
+          echo "Diff collected from this PR only."
 
       - name: Limit diff size
         run: |
@@ -149,14 +151,18 @@ jobs:
 
           if [ -f diff.txt ]; then
             SIZE=$(wc -c < diff.txt)
+
             echo "Original diff size: $SIZE bytes"
 
             if [ "$SIZE" -gt "$MAX_BYTES" ]; then
               echo "Diff is too large. Truncating to $MAX_BYTES bytes."
+
               head -c "$MAX_BYTES" diff.txt > diff_limited.txt
+
               echo "" >> diff_limited.txt
               echo "" >> diff_limited.txt
               echo "[Diff truncated because it was too large.]" >> diff_limited.txt
+
               mv diff_limited.txt diff.txt
             fi
           fi
@@ -164,22 +170,23 @@ jobs:
       - name: Generate release notes with AI
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          VERSION: ${{ steps.version.outputs.next }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           COMMITS=$(cat commits.txt || true)
           DIFF_STAT=$(cat diff_stat.txt || true)
           DIFF=$(cat diff.txt || true)
 
-          VERSION="${{ steps.version.outputs.next }}"
           RELEASE_DATE=$(date -u +"%Y-%m-%d")
           RELEASE_TIME=$(date -u +"%H:%M UTC")
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          PR_BODY="${{ github.event.pull_request.body }}"
 
           PROMPT=$(cat <<EOF
           Write GitHub release notes for version $VERSION.
 
-          The first line MUST use this exact version header (fill in date and time only from the values provided—do not invent dates):
+          The first line MUST use this exact version header:
+
           **Version $VERSION — $RELEASE_DATE, $RELEASE_TIME**
 
           Then output the changelog using EXACTLY this Markdown structure and spacing:
@@ -190,25 +197,26 @@ jobs:
           **New**
 
           - Added **[Feature Name]** - [short description]
-          - Introduced **[New Component/Architecture]** - [short description]
-          - Implemented **[Capability]** - [short description]
-          - Added **[Integration/Provider]** - [short description]
 
           **Changes**
 
-          - [Describe changed behavior, export, API, config, or default]
-          - [Describe improvement or refactor]
+          - [Describe changed behavior, export, API, config, default, or meaningful refactor]
 
           **Bug Fixes**
 
           - Fixed an issue where [problem description]
-          - Fixed [specific bug or incorrect behavior]
 
           ----
 
-          Replace bracketed placeholders with real content derived from the materials below. For **New**, pick whichever bullet stem fits each item (Added / Introduced / Implemented / Added for integrations)—you do not need every stem if unused. Use **bold** for the short title in each **New** bullet as in the template.
+          Replace bracketed placeholders with real content derived from the materials below.
 
-          Section omission (mandatory): Do not output a **New**, **Changes**, or **Bug Fixes** heading unless that section has at least one real bullet. If there are no new features, omit **New** entirely (heading and bullets). If there are no meaningful behavior/API/config/default changes or improvements, omit **Changes** entirely. If there are no bug fixes, omit **Bug Fixes** entirely. Never print placeholder bullets, "none", or empty sections to pad the template.
+          Section omission is mandatory:
+          - Do not output **New** unless there is at least one real new feature.
+          - Do not output **Changes** unless there is at least one meaningful change.
+          - Do not output **Bug Fixes** unless there is at least one real bug fix.
+          - Never print placeholder bullets.
+          - Never print "none".
+          - Never include empty sections.
 
           Context:
 
@@ -218,23 +226,24 @@ jobs:
           Pull request description:
           $PR_BODY
 
-          Commit messages:
+          Commit messages from this PR only:
           $COMMITS
 
-          Diff summary:
+          Diff summary from this PR only:
           $DIFF_STAT
 
-          Code diff:
+          Code diff from this PR only:
           $DIFF
 
           Instructions:
           - Base the release notes mainly on the actual code diff.
           - Use the PR title, PR description, and commit messages as supporting context only.
           - Focus on user-facing changes.
-          - Do not mention internal refactors unless they affect users.
+          - Mention internal refactors only if they affect users or release behavior.
           - Ignore generated files, lock files, formatting-only changes, and test-only changes unless they matter to users.
-          - Omit **New**, **Changes**, and **Bug Fixes** sections that would otherwise be empty; only include headings that have bullets.
           - Keep wording concise and factual.
+          - Do not invent features, fixes, or architectural changes.
+          - Do not include changes from previous releases.
           EOF
           )
 
