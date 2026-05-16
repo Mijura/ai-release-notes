@@ -1,0 +1,156 @@
+name: Release from merged PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release:
+    name: Generate release notes and tag version
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Get latest tag
+        id: latest_tag
+        run: |
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Validate release label
+        run: |
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+
+          echo "PR labels: $LABELS"
+
+          COUNT=0
+
+          if echo "$LABELS" | grep -q "release:major"; then
+            COUNT=$((COUNT + 1))
+          fi
+
+          if echo "$LABELS" | grep -q "release:minor"; then
+            COUNT=$((COUNT + 1))
+          fi
+
+          if echo "$LABELS" | grep -q "release:patch"; then
+            COUNT=$((COUNT + 1))
+          fi
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "Missing release label."
+            echo "Add one of: release:patch, release:minor, release:major"
+            exit 1
+          fi
+
+          if [ "$COUNT" -gt 1 ]; then
+            echo "Multiple release labels found."
+            echo "Use only one of: release:patch, release:minor, release:major"
+            exit 1
+          fi
+
+      - name: Calculate next version from PR label
+        id: version
+        run: |
+          LATEST="${{ steps.latest_tag.outputs.tag }}"
+          VERSION="${LATEST#v}"
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+
+          if echo "$LABELS" | grep -q "release:major"; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          elif echo "$LABELS" | grep -q "release:minor"; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          elif echo "$LABELS" | grep -q "release:patch"; then
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEXT="v$MAJOR.$MINOR.$PATCH"
+
+          echo "Latest version: $LATEST"
+          echo "Next version: $NEXT"
+
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+
+      - name: Collect commits since latest tag
+        run: |
+          LATEST="${{ steps.latest_tag.outputs.tag }}"
+
+          if [ "$LATEST" = "v0.0.0" ]; then
+            git log --pretty=format:"- %s (%h)" > commits.txt
+          else
+            git log "$LATEST"..HEAD --pretty=format:"- %s (%h)" > commits.txt
+          fi
+
+          echo "Commits for release:"
+          cat commits.txt
+
+      - name: Generate release notes with AI
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          COMMITS=$(cat commits.txt)
+          VERSION="${{ steps.version.outputs.next }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pr_title "$PR_TITLE" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg commits "$COMMITS" \
+            '{
+              model: "gpt-4.1-mini",
+              input: "Write concise GitHub release notes for version " + $version + ".\n\nPull request: #" + $pr_number + " - " + $pr_title + "\n\nCommits:\n" + $commits + "\n\nUse markdown. Group into sections: Features, Fixes, Chores, Breaking Changes. Omit empty sections. Keep it clear and useful for users."
+            }' > request.json
+
+          curl https://api.openai.com/v1/responses \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @request.json > response.json
+
+          jq -r '.output_text' response.json > release_notes.md
+
+          echo "Generated release notes:"
+          cat release_notes.md
+
+      - name: Create and push version tag
+        run: |
+          VERSION="${{ steps.version.outputs.next }}"
+
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.next }}"
+
+          gh release create "$VERSION" \
+            --target main \
+            --title "$VERSION" \
+            --notes-file release_notes.md
