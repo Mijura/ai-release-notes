@@ -1,4 +1,4 @@
-# ai-release-notes
+# AI Generated Release Notes
 
 **Experimental showcase.** This repository demonstrates how to generate GitHub release notes with an LLM inside [GitHub Actions](https://docs.github.com/en/actions). It is not a supported product or library—copy ideas into your own workflows and adapt them to your policies, budgets, and review process.
 
