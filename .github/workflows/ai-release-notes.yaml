@@ -170,12 +170,47 @@ jobs:
           DIFF=$(cat diff.txt || true)
 
           VERSION="${{ steps.version.outputs.next }}"
+          RELEASE_DATE=$(date -u +"%Y-%m-%d")
+          RELEASE_TIME=$(date -u +"%H:%M UTC")
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
           PR_BODY="${{ github.event.pull_request.body }}"
 
           PROMPT=$(cat <<EOF
-          Write concise GitHub release notes for version $VERSION.
+          Write GitHub release notes for version $VERSION.
+
+          The first line MUST use this exact version header (fill in date and time only from the values provided—do not invent dates):
+          **Version $VERSION — $RELEASE_DATE, $RELEASE_TIME**
+
+          Then output the changelog using EXACTLY this Markdown structure and spacing:
+
+          ### Changelog
+          ___
+
+          **New**
+
+          - Added **[Feature Name]** - [short description]
+          - Introduced **[New Component/Architecture]** - [short description]
+          - Implemented **[Capability]** - [short description]
+          - Added **[Integration/Provider]** - [short description]
+
+          **Changes**
+
+          - [Describe changed behavior, export, API, config, or default]
+          - [Describe improvement or refactor]
+
+          **Bug Fixes**
+
+          - Fixed an issue where [problem description]
+          - Fixed [specific bug or incorrect behavior]
+
+          ----
+
+          Replace bracketed placeholders with real content derived from the materials below. For **New**, pick whichever bullet stem fits each item (Added / Introduced / Implemented / Added for integrations)—you do not need every stem if unused. Use **bold** for the short title in each **New** bullet as in the template.
+
+          Section omission (mandatory): Do not output a **New**, **Changes**, or **Bug Fixes** heading unless that section has at least one real bullet. If there are no new features, omit **New** entirely (heading and bullets). If there are no meaningful behavior/API/config/default changes or improvements, omit **Changes** entirely. If there are no bug fixes, omit **Bug Fixes** entirely. Never print placeholder bullets, "none", or empty sections to pad the template.
+
+          Context:
 
           Pull request:
           #$PR_NUMBER - $PR_TITLE
@@ -194,18 +229,12 @@ jobs:
 
           Instructions:
           - Base the release notes mainly on the actual code diff.
-          - Use the PR title, PR description, and commit messages as supporting context.
+          - Use the PR title, PR description, and commit messages as supporting context only.
           - Focus on user-facing changes.
           - Do not mention internal refactors unless they affect users.
           - Ignore generated files, lock files, formatting-only changes, and test-only changes unless they matter to users.
-          - Use markdown.
-          - Group into sections:
-            - Features
-            - Fixes
-            - Chores
-            - Breaking Changes
-          - Omit empty sections.
-          - Keep it clear and useful.
+          - Omit **New**, **Changes**, and **Bug Fixes** sections that would otherwise be empty; only include headings that have bullets.
+          - Keep wording concise and factual.
           EOF
           )
 

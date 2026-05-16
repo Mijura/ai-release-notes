@@ -13,7 +13,7 @@ When a pull request is **merged** into `main`, a workflow:
 5. Calls the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses) (`gpt-4o-mini`) with the PR title, body, commits, and diff context.
 6. Pushes a new **git tag** for the version and creates a **GitHub Release** whose notes are the generated Markdown.
 
-The model is instructed to emphasize **user-facing** changes from the diff, group notes into Features / Fixes / Chores / Breaking Changes, and omit empty sections.
+The model is instructed to emphasize **user-facing** changes from the diff and to follow a fixed Markdown template: a version line with injected SemVer and UTC date/time, then **New**, **Changes**, and **Bug Fixes** sections with prescribed bullet patterns; empty sections are omitted.
 
 ## Setup
 
