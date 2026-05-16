@@ -95,45 +95,117 @@ jobs:
 
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
 
-      - name: Collect commits since latest tag
+      - name: Collect release context
         run: |
           LATEST="${{ steps.latest_tag.outputs.tag }}"
 
+          echo "Latest tag: $LATEST"
+
           if [ "$LATEST" = "v0.0.0" ]; then
             git log --pretty=format:"- %s (%h)" > commits.txt
+
+            git diff --stat HEAD~1..HEAD > diff_stat.txt || true
+
+            git diff --no-ext-diff --unified=3 HEAD~1..HEAD \
+              -- \
+              ':!package-lock.json' \
+              ':!yarn.lock' \
+              ':!pnpm-lock.yaml' \
+              ':!dist/**' \
+              ':!build/**' \
+              ':!coverage/**' \
+              ':!*.snap' \
+              > diff.txt || true
           else
             git log "$LATEST"..HEAD --pretty=format:"- %s (%h)" > commits.txt
+
+            git diff --stat "$LATEST"..HEAD > diff_stat.txt
+
+            git diff --no-ext-diff --unified=3 "$LATEST"..HEAD \
+              -- \
+              ':!package-lock.json' \
+              ':!yarn.lock' \
+              ':!pnpm-lock.yaml' \
+              ':!dist/**' \
+              ':!build/**' \
+              ':!coverage/**' \
+              ':!*.snap' \
+              > diff.txt
           fi
 
-          echo "Commits for release:"
-          cat commits.txt
+          echo "Commits:"
+          cat commits.txt || true
+
+          echo ""
+          echo "Diff summary:"
+          cat diff_stat.txt || true
+
+          echo ""
+          echo "Diff collected."
+
+      - name: Limit diff size
+        run: |
+          MAX_BYTES=60000
+
+          if [ -f diff.txt ]; then
+            SIZE=$(wc -c < diff.txt)
+            echo "Original diff size: $SIZE bytes"
+
+            if [ "$SIZE" -gt "$MAX_BYTES" ]; then
+              echo "Diff is too large. Truncating to $MAX_BYTES bytes."
+              head -c "$MAX_BYTES" diff.txt > diff_limited.txt
+              echo "" >> diff_limited.txt
+              echo "" >> diff_limited.txt
+              echo "[Diff truncated because it was too large.]" >> diff_limited.txt
+              mv diff_limited.txt diff.txt
+            fi
+          fi
 
       - name: Generate release notes with AI
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          COMMITS=$(cat commits.txt)
+          COMMITS=$(cat commits.txt || true)
+          DIFF_STAT=$(cat diff_stat.txt || true)
+          DIFF=$(cat diff.txt || true)
+
           VERSION="${{ steps.version.outputs.next }}"
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_BODY="${{ github.event.pull_request.body }}"
 
           PROMPT=$(cat <<EOF
           Write concise GitHub release notes for version $VERSION.
 
-          Pull request: #$PR_NUMBER - $PR_TITLE
+          Pull request:
+          #$PR_NUMBER - $PR_TITLE
 
-          Commits:
+          Pull request description:
+          $PR_BODY
+
+          Commit messages:
           $COMMITS
 
-          Use markdown.
-          Group into sections:
-          - Features
-          - Fixes
-          - Chores
-          - Breaking Changes
+          Diff summary:
+          $DIFF_STAT
 
-          Omit empty sections.
-          Keep it clear and useful for users.
+          Code diff:
+          $DIFF
+
+          Instructions:
+          - Base the release notes mainly on the actual code diff.
+          - Use the PR title, PR description, and commit messages as supporting context.
+          - Focus on user-facing changes.
+          - Do not mention internal refactors unless they affect users.
+          - Ignore generated files, lock files, formatting-only changes, and test-only changes unless they matter to users.
+          - Use markdown.
+          - Group into sections:
+            - Features
+            - Fixes
+            - Chores
+            - Breaking Changes
+          - Omit empty sections.
+          - Keep it clear and useful.
           EOF
           )
 
