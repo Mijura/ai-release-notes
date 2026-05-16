@@ -238,11 +238,13 @@ jobs:
           Instructions:
           - Base the release notes mainly on the actual code diff.
           - Use the PR title, PR description, and commit messages as supporting context only.
-          - Focus on user-facing changes.
-          - Mention internal refactors only if they affect users or release behavior.
-          - Ignore generated files, lock files, formatting-only changes, and test-only changes unless they matter to users.
+          - Focus on user-facing or release-relevant changes.
+          - Classify by the intent of the change, not by file type.
+          - If the purpose is to correct wrong behavior, classify it only as **Bug Fixes**.
+          - If the purpose is to intentionally alter behavior, classify it as **Changes**.
+          - If the purpose is to add a new capability, classify it as **New**.
+          - Ignore generated files, lock files, formatting-only changes, and test-only changes unless they affect users.
           - Keep wording concise and factual.
-          - Do not invent features, fixes, or architectural changes.
           - Do not include changes from previous releases.
           EOF
           )
